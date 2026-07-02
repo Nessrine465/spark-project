@@ -13,7 +13,7 @@ L'énoncé complet et la grille : projects/projet-jour-4.md
 """
 
 import sys
-
+import time
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from pyspark.sql.types import StructType, StructField, IntegerType, LongType, StringType, DoubleType
@@ -189,55 +189,125 @@ def ecrire_silver(dfs):
     print("Couche silver écrite dans", SORTIE_SILVER)
 
 def transformation_et_analyses(spark):
-    """Étape 2 : relire le propre, puis 3 analyses (silver -> gold).
+    """Étape 2 : relire la silver et produire 3 analyses gold."""
 
-    On relit la couche Parquet nettoyée (pas les données brutes).
+    # Lecture des données nettoyées (Silver)
+    movies = spark.read.parquet(f"{SORTIE_SILVER}/movies")
+    ratings = spark.read.parquet(f"{SORTIE_SILVER}/ratings")
 
-    TODO : produire AU MOINS TROIS analyses, dont :
-    - une AGRÉGATION (groupBy + agg) ;
-    - une JOINTURE (join, idéalement avec F.broadcast sur la petite table) ;
-    - une WINDOW FUNCTION (Window.partitionBy(...).orderBy(...), row_number/rank/lag).
-    Et au moins UNE OPTIMISATION justifiée : broadcast, cache, ou repartition.
-    """
-    df = spark.read.parquet(SORTIE_SILVER)
+    print("=== Lecture Silver ===")
+    print("Movies silver :", movies.count())
+    print("Ratings silver :", ratings.count())
 
-    # Optimisation cache : utile UNIQUEMENT si df est réutilisé par plusieurs analyses.
-    df = df.cache()
-    df.count()  # matérialise le cache
+    # Mise en cache de la table ratings car elle est utilisée plusieurs fois
+    ratings = ratings.cache()
+    ratings.count()
 
-    # --- Analyse 1 : agrégation -------------------------------------------------
-    # TODO : groupBy(...).agg(F.count, F.avg, F.sum...) sur une question métier.
-    analyse_1 = None
+    # 1. Agrégation : top rated movies
+    # Objectif : identifier les films les mieux notés avec au moins 50 votes
 
-    # --- Analyse 2 : jointure ---------------------------------------------------
-    # TODO : charger une table de référence et la joindre.
-    # Pensez à F.broadcast(petite_table) pour éviter un shuffle.
-    analyse_2 = None
-
-    # --- Analyse 3 : window function -------------------------------------------
-    # TODO : classement / cumul / moyenne glissante par groupe.
-    # fenetre = Window.partitionBy("groupe").orderBy(F.desc("metrique"))
-    # ... .withColumn("rang", F.row_number().over(fenetre)).filter(F.col("rang") <= 10)
-    analyse_3 = None
-
-    if analyse_1 is None or analyse_2 is None or analyse_3 is None:
-        raise NotImplementedError(
-            "TODO analyses : produisez 3 analyses (agrégation, jointure, window)."
+    top_rated_movies = (
+        ratings
+        .groupBy("movieId")
+        .agg(
+            F.count("*").alias("nb_votes"),
+            F.round(F.avg("rating"), 2).alias("note_moyenne")
         )
+        .filter(F.col("nb_votes") >= 50)
+        .orderBy(F.desc("note_moyenne"), F.desc("nb_votes"))
+    )
 
-    return {"analyse_1": analyse_1, "analyse_2": analyse_2, "analyse_3": analyse_3}
+    print("=== Analyse 1 : top_rated_movies ===")
+    top_rated_movies.show(20, truncate=False)
 
+    # 2. Jointure : top rated movies with titles
+    # Objectif : récupérer le titre et le genre des films les mieux notés
+    # Optimisation : Broadcast de la table movies
+
+    debut = time.time()
+
+    top_rated_movies_with_titles = (
+        top_rated_movies
+        .join(
+            F.broadcast(movies),
+            on="movieId",
+            how="inner"
+        )
+        .select(
+            "movieId",
+            "title",
+            "genres",
+            "nb_votes",
+            "note_moyenne"
+        )
+        .orderBy(F.desc("note_moyenne"), F.desc("nb_votes"))
+    )
+
+    # Déclenche l'exécution afin de mesurer le temps réel de la jointure
+    top_rated_movies_with_titles.count()
+
+    fin = time.time()
+    print("Temps de la jointure avec Broadcast :", round(fin - debut, 2), "secondes")
+
+    # Affichage du plan physique pour vérifier l'utilisation du Broadcast
+    top_rated_movies_with_titles.explain()
+
+    print("=== Analyse 2 : top_rated_movies_with_titles ===")
+    top_rated_movies_with_titles.show(20, truncate=False)
+
+    # 3. Window function : top movies by genre
+    # Objectif : classer les films par genre et conserver les 3 meilleurs de chaque catégorie.
+
+    films_genres = (
+        top_rated_movies_with_titles
+        .withColumn("genre", F.explode(F.split(F.col("genres"), "\\|")))
+    )
+
+    # Définition de la fenêtre de classement par genre
+    fenetre = Window.partitionBy("genre").orderBy(
+        F.desc("note_moyenne"),
+        F.desc("nb_votes")
+    )
+
+    top_movies_by_genre = (
+        films_genres
+        .withColumn("rang", F.row_number().over(fenetre))
+        .filter(F.col("rang") <= 3)
+        .select(
+            "genre",
+            "rang",
+            "movieId",
+            "title",
+            "nb_votes",
+            "note_moyenne"
+        )
+        .orderBy("genre", "rang")
+    )
+
+    print("=== Analyse 3 : top_movies_by_genre ===")
+    top_movies_by_genre.show(80, truncate=False)
+
+
+    # Retour des trois analyses pour l'écriture dans la couche Gold
+    return {
+        "top_rated_movies": top_rated_movies,
+        "top_rated_movies_with_titles": top_rated_movies_with_titles,
+        "top_movies_by_genre": top_movies_by_genre
+    }
 
 def ecrire_gold(resultats):
-    """Étape 3 : écrire les résultats de synthèse.
+    """Étape 3 : écrire les résultats de synthèse dans la couche Gold."""
 
-    TODO :
-    - Écrire chaque résultat (Parquet ou CSV). coalesce(1) est acceptable ICI car les
-      résultats agrégés sont PETITS. Ne jamais coalesce(1) un gros DataFrame.
-    """
+    # Les résultats étant de petite taille, on les écrit en un seul fichier CSV.
     for nom, df in resultats.items():
         chemin = f"{SORTIE_GOLD}/{nom}"
-        df.coalesce(1).write.mode("overwrite").parquet(chemin)
+
+        df.coalesce(1) \
+          .write \
+          .mode("overwrite") \
+          .option("header", True) \
+          .csv(chemin)
+
         print("Résultat écrit :", chemin)
 
 
@@ -251,10 +321,10 @@ def main():
     ecrire_silver(propre)
 
     # Étape 2 : transformation et analyses (silver -> gold)
-    # resultats = transformation_et_analyses(spark)
+    resultats = transformation_et_analyses(spark)
 
     # Étape 3 : finalisation
-    # ecrire_gold(resultats)
+    ecrire_gold(resultats)
 
     # Garder la session vivante pour explorer la Spark UI.
     # Décommentez la ligne suivante si le pipeline se termine trop vite :
