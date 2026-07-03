@@ -209,10 +209,9 @@ Résultats obtenus :
 | Lecture | Nombre de lignes | Temps |
 |---|---:|---:|
 | Sans filtre | 100836 | 0.11 s |
-| Avec filtre `annee_rating = 2018` | 6418 | 0.08
- s |
+| Avec filtre `annee_rating = 2018` | 6418 | 0.08 s |
 
-Le résultat est légèrement contre-intuitif : le filtre n'est pas plus rapide sur ce petit volume de données. Cela peut s'expliquer par le coût fixe de lancement des jobs Spark, qui devient plus important que le gain de lecture sur un dataset de petite taille.
+Le filtre sur `annee_rating = 2018` réduit le nombre de lignes lues de 100836 à 6418. Sur cette exécution, le temps passe de 0.11 s à 0.08 s. Le gain reste limité car le dataset MovieLens utilisé est de petite taille, mais le test montre l'intérêt du partitionnement pour réduire le volume traité.
 
 ---
 
