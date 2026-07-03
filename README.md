@@ -48,7 +48,7 @@ Le projet produit trois analyses :
 
 ## Optimisations
 
-Les principales optimisations utilisées sont :
+Les principales optimisations mises en œuvre dans le pipeline sont :
 
 - mise en cache du DataFrame `ratings` (`cache()`) ;
 - `BroadcastHashJoin` pour optimiser la jointure avec la table `movies`.
@@ -63,8 +63,6 @@ Deux explorations de performances ont été réalisées :
 - comparaison entre une **fonction native Spark** et une **UDF Python**.
 
 Le projet inclut également un bonus avec **Spark MLlib**, utilisant l'algorithme **ALS** pour construire un mini système de recommandation de films.
-
----
 
 ---
 
@@ -109,9 +107,8 @@ Le pipeline exécute automatiquement :
 
 ## Technologies utilisées
 
-- Python
 - Apache Spark (PySpark)
 - Spark SQL
-- MLlib
+- PySpark MLlib
 - Parquet
 - Git / GitHub
