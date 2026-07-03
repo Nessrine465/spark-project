@@ -4,6 +4,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 from pyspark.sql.types import StructType, StructField, IntegerType, LongType, StringType, DoubleType
 from spark_session import get_spark
+from pyspark.ml.recommendation import ALS
+from pyspark.ml.evaluation import RegressionEvaluator
 
 # Chemins des fichiers sources et des dossiers de sortie
 
@@ -294,125 +296,186 @@ def ecrire_gold(resultats):
 
         print("Résultat écrit :", chemin)
 
-def exploration_broadcast_vs_sortmerge(spark):
-    """Exploration : comparer BroadcastHashJoin et SortMergeJoin."""
+def exploration_pushdown_partition_pruning(spark):
+    """Exploration 1 : mesurer le partition pruning sur la table ratings partitionnée."""
 
-    print("\n=== Exploration : BroadcastHashJoin vs SortMergeJoin ===")
+    print("\n=== Exploration 1 : partition pruning sur Parquet ===")
 
-    movies = spark.read.parquet(f"{SORTIE_SILVER}/movies")
+    ratings_path = f"{SORTIE_SILVER}/ratings"
+
+    # Test 1 : lecture complète de la table ratings sans filtre.
+    # Spark doit parcourir l'ensemble des partitions disponibles.
+    debut_sans_filtre = time.time()
+
+    ratings_complet = spark.read.parquet(ratings_path)
+    nb_lignes_total = ratings_complet.count()
+
+    fin_sans_filtre = time.time()
+    temps_sans_filtre = round(fin_sans_filtre - debut_sans_filtre, 2)
+
+    print("Lecture SANS filtre")
+    print("Nombre de lignes :", nb_lignes_total)
+    print("Temps :", temps_sans_filtre, "secondes")
+    ratings_complet.explain()
+
+    # Test 2 : lecture avec filtre sur la colonne de partition annee_rating.
+    # L'objectif est de vérifier si Spark limite la lecture à la partition 2018.
+    debut_avec_filtre = time.time()
+
+    ratings_filtre = (
+        spark.read.parquet(ratings_path)
+        .filter(F.col("annee_rating") == 2018)
+    )
+
+    nb_lignes_filtrees = ratings_filtre.count()
+
+    fin_avec_filtre = time.time()
+    temps_avec_filtre = round(fin_avec_filtre - debut_avec_filtre, 2)
+
+    print("\nLecture AVEC filtre annee_rating = 2018")
+    print("Nombre de lignes :", nb_lignes_filtrees)
+    print("Temps :", temps_avec_filtre, "secondes")
+    ratings_filtre.explain()
+
+    print("\n=== Conclusion exploration pushdown ===")
+    print("Sans filtre :", temps_sans_filtre, "secondes")
+    print("Avec filtre partition :", temps_avec_filtre, "secondes")
+
+def exploration_udf_vs_native(spark):
+    """Exploration 2 : comparer une UDF Python avec une fonction native Spark."""
+
+    print("\n=== Exploration 2 : UDF vs fonction native ===")
+
     ratings = spark.read.parquet(f"{SORTIE_SILVER}/ratings")
 
-    top_rated_movies = (
+    # Test 1 : transformation avec une fonction native Spark.
+    # Cette version est optimisée par Spark et reste dans le moteur d'exécution JVM.
+    debut_native = time.time()
+
+    ratings_native = (
         ratings
-        .groupBy("movieId")
-        .agg(
-            F.count("*").alias("nb_votes"),
-            F.round(F.avg("rating"), 2).alias("note_moyenne")
+        .withColumn(
+            "rating_category",
+            F.when(F.col("rating") >= 4, "positive").otherwise("other")
         )
-        .filter(F.col("nb_votes") >= 50)
     )
 
-    # Test 1 : BroadcastHashJoin forcé
-    debut_broadcast = time.time()
+    ratings_native.groupBy("rating_category").count().count()
 
-    join_broadcast = top_rated_movies.join(
-        F.broadcast(movies),
-        on="movieId",
-        how="inner"
+    fin_native = time.time()
+    temps_native = round(fin_native - debut_native, 2)
+
+    print("Temps fonction native Spark :", temps_native, "secondes")
+    ratings_native.explain()
+
+    # Test 2 : même transformation avec une UDF Python.
+
+    def categoriser_note(rating):
+        if rating is None:
+            return "unknown"
+        if rating >= 4:
+            return "positive"
+        return "other"
+
+    categoriser_note_udf = F.udf(categoriser_note, StringType())
+
+    debut_udf = time.time()
+
+    ratings_udf = (
+        ratings
+        .withColumn(
+            "rating_category",
+            categoriser_note_udf(F.col("rating"))
+        )
     )
 
-    join_broadcast.count()
+    ratings_udf.groupBy("rating_category").count().count()
 
-    fin_broadcast = time.time()
-    temps_broadcast = round(fin_broadcast - debut_broadcast, 2)
+    fin_udf = time.time()
+    temps_udf = round(fin_udf - debut_udf, 2)
 
-    print("\nTemps AVEC BroadcastHashJoin :", temps_broadcast, "secondes")
-    join_broadcast.explain()
+    print("Temps UDF Python :", temps_udf, "secondes")
+    ratings_udf.explain()
 
-    # Test 2 : désactiver le broadcast automatique
-    ancienne_valeur = spark.conf.get("spark.sql.autoBroadcastJoinThreshold")
+    print("\n=== Conclusion exploration UDF ===")
+    print("Fonction native Spark :", temps_native, "secondes")
+    print("UDF Python :", temps_udf, "secondes")
 
-    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", -1)
+def bonus_mllib_recommandation(spark):
+    """Bonus MLlib : entraîner un mini-modèle de recommandation avec ALS."""
 
-    debut_sortmerge = time.time()
+    print("\n=== Bonus MLlib : système de recommandation ALS ===")
 
-    join_sortmerge = top_rated_movies.join(
-        movies,
-        on="movieId",
-        how="inner"
-    )
-
-    join_sortmerge.count()
-
-    fin_sortmerge = time.time()
-    temps_sortmerge = round(fin_sortmerge - debut_sortmerge, 2)
-
-    print("\nTemps SANS Broadcast automatique :", temps_sortmerge, "secondes")
-    join_sortmerge.explain()
-
-    # Restaurer la configuration Spark initiale
-    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", ancienne_valeur)
-
-    print("\n=== Conclusion exploration ===")
-    print("BroadcastHashJoin :", temps_broadcast, "secondes")
-    print("SortMergeJoin / sans broadcast automatique :", temps_sortmerge, "secondes")
-
-def exploration_cache_vs_sans_cache(spark):
-    """Exploration bonus : comparer les performances avec et sans cache."""
-
-    print("\n=== Exploration bonus : avec / sans cache ===")
-
+    # Lecture des notes nettoyées depuis la couche Silver.
     ratings = spark.read.parquet(f"{SORTIE_SILVER}/ratings")
+
+    # MLlib ALS attend des identifiants utilisateur/film entiers
+    # et une note au format float.
+    ratings_mllib = ratings.select(
+        F.col("userId").cast("int"),
+        F.col("movieId").cast("int"),
+        F.col("rating").cast("float")
+    )
+
+    # Séparation des données en apprentissage et test.
+    train, test = ratings_mllib.randomSplit([0.8, 0.2], seed=42)
+
+    # Modèle ALS : algorithme classique de recommandation collaborative.
+    als = ALS(
+        userCol="userId",
+        itemCol="movieId",
+        ratingCol="rating",
+        rank=10,
+        maxIter=5,
+        regParam=0.1,
+        coldStartStrategy="drop",
+        nonnegative=True
+    )
+
+    debut = time.time()
+
+    # Entraînement du modèle sur les notes d'apprentissage.
+    modele = als.fit(train)
+
+    # Prédiction des notes sur le jeu de test.
+    predictions = modele.transform(test)
+
+    # Évaluation avec le RMSE : plus il est faible, plus les prédictions sont proches des notes réelles.
+    evaluator = RegressionEvaluator(
+        metricName="rmse",
+        labelCol="rating",
+        predictionCol="prediction"
+    )
+
+    rmse = evaluator.evaluate(predictions)
+
+    fin = time.time()
+    temps = round(fin - debut, 2)
+
+    print("Temps entraînement + évaluation :", temps, "secondes")
+    print("RMSE du modèle ALS :", round(rmse, 4))
+
+    # Génération des 3 meilleures recommandations par utilisateur.
+    recommandations = modele.recommendForAllUsers(3)
+
+    # Jointure avec movies pour remplacer les movieId par des titres compréhensibles.
     movies = spark.read.parquet(f"{SORTIE_SILVER}/movies")
 
-    # Test 1 : sans cache
-    debut_sans_cache = time.time()
-
-    result_sans_cache = (
-        ratings
-        .groupBy("movieId")
-        .agg(
-            F.count("*").alias("nb_votes"),
-            F.round(F.avg("rating"), 2).alias("note_moyenne")
+    recommandations_detaillees = (
+        recommandations
+        .withColumn("rec", F.explode("recommendations"))
+        .select(
+            "userId",
+            F.col("rec.movieId").alias("movieId"),
+            F.round(F.col("rec.rating"), 2).alias("score_predit")
         )
-        .filter(F.col("nb_votes") >= 50)
-        .join(F.broadcast(movies), on="movieId", how="inner")
+        .join(F.broadcast(movies), on="movieId", how="left")
+        .select("userId", "title", "genres", "score_predit")
+        .orderBy("userId", F.desc("score_predit"))
     )
 
-    result_sans_cache.count()
-
-    fin_sans_cache = time.time()
-    temps_sans_cache = round(fin_sans_cache - debut_sans_cache, 2)
-
-    print("Temps SANS cache :", temps_sans_cache, "secondes")
-
-    # Test 2 : avec cache
-    ratings_cache = ratings.cache()
-    ratings_cache.count()
-
-    debut_avec_cache = time.time()
-
-    result_avec_cache = (
-        ratings_cache
-        .groupBy("movieId")
-        .agg(
-            F.count("*").alias("nb_votes"),
-            F.round(F.avg("rating"), 2).alias("note_moyenne")
-        )
-        .filter(F.col("nb_votes") >= 50)
-        .join(F.broadcast(movies), on="movieId", how="inner")
-    )
-
-    result_avec_cache.count()
-
-    fin_avec_cache = time.time()
-    temps_avec_cache = round(fin_avec_cache - debut_avec_cache, 2)
-
-    print("Temps AVEC cache :", temps_avec_cache, "secondes")
-
-    print("\n=== Conclusion exploration cache ===")
-    print("Sans cache :", temps_sans_cache, "secondes")
-    print("Avec cache :", temps_avec_cache, "secondes")
+    print("Top 3 recommandations détaillées par utilisateur :")
+    recommandations_detaillees.filter(F.col("userId") <= 5).show(truncate=False)
 
 def main():
     spark = get_spark("Projet Jour 4 - Mon pipeline")
@@ -430,8 +493,10 @@ def main():
     ecrire_gold(resultats)
 
     # Étape 4 : explorations supplémentaires
-    exploration_broadcast_vs_sortmerge(spark)
-    exploration_cache_vs_sans_cache(spark)
+    exploration_pushdown_partition_pruning(spark)
+    exploration_udf_vs_native(spark)
+
+    bonus_mllib_recommandation(spark)
 
     # Garder la session vivante pour explorer la Spark UI.
     input("Spark UI sur http://localhost:4040 - Entree pour quitter...")
