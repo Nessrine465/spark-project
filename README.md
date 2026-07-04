@@ -31,7 +31,10 @@ spark-project/
 ├── spark_session.py
 ├── requirements.txt
 ├── README.md
-└── rapport-modele.md
+└── projects
+    └──rapport-modele.md
+    └──captures
+
 ```
 
 ---
@@ -62,7 +65,7 @@ Deux explorations de performances ont été réalisées :
 - **Partition Pruning** sur une table Parquet partitionnée ;
 - comparaison entre une **fonction native Spark** et une **UDF Python**.
 
-Le projet inclut également un bonus avec **Spark MLlib**, utilisant l'algorithme **ALS** pour construire un mini système de recommandation de films.
+Le projet comprend également un bonus avec **Spark MLlib**, utilisant l'algorithme **ALS** afin de construire un mini système de recommandation de films.
 
 ---
 
@@ -74,15 +77,15 @@ Pendant l'exécution du pipeline, l'interface **Spark UI** est accessible à l'a
 http://localhost:4040
 ```
 
-Cette interface permet de suivre l'exécution des traitements Spark et d'analyser :
+Elle permet d'observer :
 
 - les **Jobs** exécutés ;
 - les **Stages** et leurs tâches ;
 - le **DAG (Directed Acyclic Graph)** des traitements ;
-- le **Storage**, pour vérifier la mise en cache des DataFrames ;
-- les plans d'exécution **SQL/DataFrame** afin d'observer les optimisations appliquées.
+- le **Storage**, afin de vérifier la mise en cache des DataFrames ;
+- les plans d'exécution **SQL/DataFrame**, permettant de visualiser les optimisations appliquées par Spark.
 
-Les captures d'écran et l'analyse de la Spark UI sont présentées dans le rapport du projet.
+Une analyse détaillée de la Spark UI est présentée dans le rapport du projet.
 
 ---
 
@@ -100,7 +103,7 @@ Le pipeline exécute automatiquement :
 2. le nettoyage ;
 3. l'écriture de la couche Silver ;
 4. les analyses Gold ;
-5. les explorations ;
+5. les explorations de performances ;
 6. le bonus MLlib.
 
 ---
@@ -109,6 +112,7 @@ Le pipeline exécute automatiquement :
 
 - Apache Spark (PySpark)
 - Spark SQL
-- PySpark MLlib
+- Spark MLlib
 - Parquet
-- Git / GitHub
+- Git
+- GitHub

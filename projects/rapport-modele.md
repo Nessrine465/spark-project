@@ -2,7 +2,7 @@
 
 # Pipeline ETL et Analyses de Données avec Apache Spark
 
-**Étudiants :** Nessrine BOUZRINA & Melissa DJABELLA
+**Étudiantes :** Nessrine BOUZRINA & Melissa DJABELLA
 
 ---
 
@@ -46,7 +46,7 @@ Analyses Spark
 Gold
 ```
 
-Le pipeline comporte les étapes suivantes :
+Le pipeline est composé des étapes suivantes :
 
 - ingestion des fichiers CSV ;
 - nettoyage des données ;
@@ -268,34 +268,21 @@ Cette optimisation évite un shuffle important et accélère la jointure.
 
 
 ```python
-debut = time.time()
-
 top_rated_movies_with_titles = (
-        top_rated_movies
-        .join(
-            F.broadcast(movies),
-            on="movieId",
-            how="inner"
-        )
-        .select(
-            "movieId",
-            "title",
-            "genres",
-            "nb_votes",
-            "note_moyenne"
-        )
-        .orderBy(F.desc("note_moyenne"), F.desc("nb_votes"))
+    top_rated_movies
+    .join(
+        F.broadcast(movies),
+        on="movieId",
+        how="inner"
     )
-
-    top_rated_movies_with_titles.count()
-
-    fin = time.time()
-    print("Temps de la jointure avec Broadcast :", round(fin - debut, 2), "secondes")
-
-    top_rated_movies_with_titles.explain()
-
-    print("=== Analyse 2 : top_rated_movies_with_titles ===")
-    top_rated_movies_with_titles.show(20, truncate=False)
+    .select(
+        "movieId",
+        "title",
+        "genres",
+        "nb_votes",
+        "note_moyenne"
+    )
+)
 ```
 
 Le résultat obtenu contient :
@@ -328,22 +315,10 @@ Identifier les trois meilleurs films pour chaque genre.
 Les genres étant stockés sous forme de chaîne de caractères séparée par le caractère `|`, ils sont d'abord séparés grâce à :
 
 ```python
-films_genres = (
-    top_rated_movies_with_titles
-    .withColumn(
-        "genre",
-        F.explode(F.split("genres", "\\|"))
-    )
-)
-
-fenetre = Window.partitionBy("genre").orderBy(
-    F.desc("note_moyenne")
-)
-
 top_movies_by_genre = (
     films_genres
-    .withColumn("rang",
-        F.row_number().over(fenetre))
+    .withColumn("rang", F.row_number().over(fenetre))
+    .filter(F.col("rang") <= 3)
 )
    
 ```
