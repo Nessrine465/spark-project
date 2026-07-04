@@ -495,10 +495,13 @@ La capture suivante présente les temps d'exécution obtenus lors de la comparai
 
 ![Résultat de l'exploration Partition Pruning](captures/resultat_pushdown.png)
 
-Le plan d'exécution a également été étudié afin de vérifier le comportement de Spark.
+Le plan d'exécution a également été étudié afin d'observer le comportement de Spark lors de la lecture des données partitionnées.
 
-Cette exploration montre que le filtrage sur une colonne de partition permet de réduire le volume de données à lire. Sur ce jeu de données relativement petit, le gain de temps reste limité, mais cette optimisation devient particulièrement intéressante lorsque les volumes augmentent.
+Cette exploration consistait à comparer une lecture complète de la table `ratings` avec une lecture filtrée sur la partition `annee_rating = 2018`.
 
+Les mesures obtenues montrent que la lecture filtrée est légèrement plus lente (0,09 s) que la lecture complète (0,07 s), alors qu'elle ne lit que 6 418 lignes contre 100 836 pour la lecture sans filtre.
+
+Ce résultat peut paraître contre-intuitif, mais il s'explique par la faible taille du jeu de données MovieLens. Sur un volume aussi réduit, le coût fixe de démarrage et de planification du job Spark est plus important que le gain apporté par le partition pruning. En revanche, sur des jeux de données beaucoup plus volumineux, cette optimisation permet généralement de limiter les données lues et d'améliorer les performances.
 ---
 
 # 9. Exploration 2 : UDF Python vs Fonction Native Spark
@@ -523,7 +526,7 @@ Les résultats obtenus sont les suivants :
 | UDF Python | 0.73 s |
 
 La capture suivante montre les temps mesurés pour les deux implémentations.
-![Résultat de l'exploration UDF](captures/resultat_udf.png)
+![Résultat de l'exploration UDF](captures/resultat_UDF.png)
 
 L'analyse du plan d'exécution montre que la fonction native est directement optimisée par Spark.
 
