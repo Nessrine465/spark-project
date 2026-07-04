@@ -157,13 +157,13 @@ L'utilisation d'un schéma explicite présente plusieurs avantages :
 
 Les figures suivantes présentent les schémas explicitement définis lors du chargement des fichiers CSV.
 
-![Figure 1 - Schéma de la table movies](captures/figure1_schema_movies.png)
+![Figure 1 - Schéma de la table movies](captures/schema_movies.png)
 
-![Figure 2 - Schéma de la table ratings](captures/figure2_schema_ratings.png)
+![Figure 2 - Schéma de la table ratings](captures/schema_ratings.png)
 
-![Figure 3 - Schéma de la table tags](captures/figure3_schema_tags.png)
+![Figure 3 - Schéma de la table tags](captures/schema_tags.png)
 
-![Figure 4 - Schéma de la table links](captures/figure4_schema_links.png)
+![Figure 4 - Schéma de la table links](captures/schema_links.png)
 
 Après l'ingestion, plusieurs traitements de nettoyage sont appliqués.
 
@@ -460,7 +460,7 @@ Le DAG représente les différentes transformations exécutées par Spark ainsi 
 
 ## 7.4 Storage
 
-![Storage](captures/Storage.png)
+![Storage](captures/storage.png)
 
 Cette capture montre que le DataFrame ratings est correctement mis en cache grâce à l'appel à cache(). Cette optimisation évite de relire plusieurs fois les mêmes données.
 
@@ -523,7 +523,7 @@ Les résultats obtenus sont les suivants :
 | UDF Python | 0.73 s |
 
 La capture suivante montre les temps mesurés pour les deux implémentations.
-![Résultat de l'exploration UDF](captures/exploration_udf.png)
+![Résultat de l'exploration UDF](captures/resultat_udf.png)
 
 L'analyse du plan d'exécution montre que la fonction native est directement optimisée par Spark.
 
